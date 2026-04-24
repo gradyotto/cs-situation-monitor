@@ -4,7 +4,7 @@
   "description": "Customer Support Monitoring Dashboard for OmniCommerce Technologies",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "db:migrate": "psql $DATABASE_URL -f src/db/schema.sql"
