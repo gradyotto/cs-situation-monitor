@@ -169,7 +169,7 @@ function render() {
 function renderMetrics() {
   const m = state.metrics || {};
   const clusters = state.clusters || [];
-  document.getElementById('m-open').textContent = m.openConversations ?? clusters.reduce((s,c)=>s+(c.events||[]).filter(e=>e.status==='open').length,0) || '0';
+  document.getElementById('m-open').textContent = (m.openConversations ?? clusters.reduce((s,c)=>s+(c.events||[]).filter(e=>e.status==='open').length,0)) || '0';
   document.getElementById('m-clusters').textContent = clusters.length;
   document.getElementById('m-response').textContent = m.avgFirstResponseMinutes > 0 ? `${m.avgFirstResponseMinutes}m` : 'N/A';
   const critical = clusters.filter(c => c.severity === 'high').length;
