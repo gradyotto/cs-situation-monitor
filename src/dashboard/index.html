@@ -112,7 +112,7 @@ header h1{font-size:15px;letter-spacing:.5px}
 </div>
 
 <script>
-const WS_URL = `ws://${location.host}/ws`;
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 let state = { clusters: [], recentEvents: [], metrics: {}, clusteringStatus: {} };
 let ws, reconnectTimer;
 
