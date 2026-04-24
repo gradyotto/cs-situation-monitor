@@ -68,11 +68,55 @@ if (config.nodeEnv !== 'production') {
   });
 }
 
-// --- API: get full dashboard state (used by WS on reconnect) ---
+// --- API: get full dashboard state ---
 app.get('/api/state', async (_req: Request, res: Response) => {
   try {
     const state = await buildDashboardState();
     res.json(state);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// --- Cluster archive / restore ---
+app.post('/api/clusters/:id/archive', async (req: Request, res: Response) => {
+  try {
+    await query(
+      `UPDATE clusters SET archived_at = NOW() WHERE id = $1`,
+      [req.params.id]
+    );
+    await broadcastState();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post('/api/clusters/:id/restore', async (req: Request, res: Response) => {
+  try {
+    await query(
+      `UPDATE clusters SET archived_at = NULL WHERE id = $1`,
+      [req.params.id]
+    );
+    await broadcastState();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// --- API: get archived clusters ---
+app.get('/api/clusters/archived', async (_req: Request, res: Response) => {
+  try {
+    const rows = await query<{
+      id: string; label: string; conversation_count: number;
+      severity: string; archived_at: Date;
+    }>(
+      `SELECT id, label, conversation_count, severity, archived_at
+       FROM clusters WHERE archived_at IS NOT NULL
+       ORDER BY archived_at DESC`
+    );
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -92,7 +136,7 @@ async function buildDashboardState(): Promise<DashboardState> {
 
   const clusters = await query<ClusterRow>(
     `SELECT id, label, slug, conversation_count, severity, created_at, updated_at
-     FROM clusters ORDER BY conversation_count DESC`
+     FROM clusters WHERE archived_at IS NULL ORDER BY conversation_count DESC`
   );
 
   const recentEvents = await query<EventRow>(

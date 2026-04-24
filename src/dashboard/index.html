@@ -61,6 +61,15 @@ header h1{font-size:15px;letter-spacing:.5px}
 .status-row{display:flex;justify-content:space-between}
 .status-val{font-weight:700}
 .empty{padding:16px 12px;color:#9ca3af;font-size:11px;text-align:center}
+.dismiss-btn{font-size:10px;padding:2px 7px;border:1px solid #e5e7eb;border-radius:3px;background:#fff;color:#6b7280;cursor:pointer;white-space:nowrap}
+.dismiss-btn:hover{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
+.restore-btn{font-size:10px;padding:2px 7px;border:1px solid #e5e7eb;border-radius:3px;background:#fff;color:#6b7280;cursor:pointer}
+.restore-btn:hover{background:#dcfce7;border-color:#86efac;color:#166534}
+.archive-row{padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px}
+.archive-label{flex:1;font-size:12px;font-weight:600}
+.archive-meta{font-size:11px;color:#9ca3af}
+.cluster-panel-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;padding:8px 12px;display:flex;justify-content:space-between;align-items:center}
+.archive-toggle{font-size:10px;color:#3b82f6;cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0}
 </style>
 </head>
 <body>
@@ -78,8 +87,15 @@ header h1{font-size:15px;letter-spacing:.5px}
 
 <div class="main">
   <div class="clusters-panel">
-    <div class="panel-title">Issue Clusters</div>
+    <div class="cluster-panel-title">
+      Issue Clusters
+      <span class="archive-toggle" onclick="toggleArchive()">Show Archive</span>
+    </div>
     <div id="clusters-list"><div class="empty">No clusters yet — waiting for events</div></div>
+    <div id="archive-section" style="display:none">
+      <div style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af;border-top:2px solid #e5e7eb;margin-top:8px">Archived Clusters</div>
+      <div id="archive-list"><div class="empty">No archived clusters</div></div>
+    </div>
   </div>
 
   <div class="right-panel">
@@ -214,6 +230,7 @@ function renderClusters() {
         <div class="cluster-label">${esc(c.label || c.slug || 'Cluster')}</div>
         <span class="cluster-count">${c.conversationCount} conv</span>
         ${severityBadge(c.severity)}
+        <button class="dismiss-btn" onclick="event.stopPropagation();archiveCluster('${c.id}')">Dismiss</button>
       </div>
       <div class="fill-bar"><div class="fill-bar-inner" style="width:${pct}%"></div></div>
       <div class="cluster-events" id="ce-${i}">${eventsHtml || '<div class="empty">No events loaded</div>'}</div>
@@ -266,6 +283,43 @@ function renderEngineStatus() {
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let archiveVisible = false;
+
+function toggleArchive() {
+  archiveVisible = !archiveVisible;
+  document.getElementById('archive-section').style.display = archiveVisible ? 'block' : 'none';
+  document.querySelector('.archive-toggle').textContent = archiveVisible ? 'Hide Archive' : 'Show Archive';
+  if (archiveVisible) loadArchive();
+}
+
+async function loadArchive() {
+  const list = document.getElementById('archive-list');
+  try {
+    const res = await fetch('/api/clusters/archived');
+    const rows = await res.json();
+    if (!rows.length) { list.innerHTML = '<div class="empty">No archived clusters</div>'; return; }
+    list.innerHTML = rows.map(r => `
+      <div class="archive-row">
+        <div>
+          <div class="archive-label">${esc(r.label)}</div>
+          <div class="archive-meta">${r.conversation_count} conversations · dismissed ${timeAgo(r.archived_at)}</div>
+        </div>
+        ${severityBadge(r.severity)}
+        <button class="restore-btn" onclick="restoreCluster('${r.id}')">Restore</button>
+      </div>`).join('');
+  } catch { list.innerHTML = '<div class="empty">Failed to load archive</div>'; }
+}
+
+async function archiveCluster(id) {
+  await fetch(`/api/clusters/${id}/archive`, { method: 'POST' });
+  if (archiveVisible) loadArchive();
+}
+
+async function restoreCluster(id) {
+  await fetch(`/api/clusters/${id}/restore`, { method: 'POST' });
+  loadArchive();
 }
 
 document.querySelectorAll('.tab').forEach(t => {
