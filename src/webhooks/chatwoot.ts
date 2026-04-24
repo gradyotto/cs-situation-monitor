@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
 import { SupportEvent } from '../types';
 import { processEvent } from '../clustering/engine';
-import { query, setLastWebhookReceived } from '../db/client';
+import { query, queryOne, setLastWebhookReceived } from '../db/client';
 
 const router = Router();
 
@@ -13,49 +13,94 @@ function mapStatus(status: string): SupportEvent['status'] {
   return 'open';
 }
 
+/** Map Chatwoot's internal channel class names to friendly display names */
+function friendlyInboxName(
+  inboxName: string | undefined,
+  channelType: string | undefined
+): string {
+  if (inboxName?.trim()) return inboxName.trim();
+  const type = channelType ?? '';
+  if (type.includes('WebWidget')) return 'Web Chat';
+  if (type.includes('Instagram')) return 'Instagram';
+  if (type.includes('Whatsapp')) return 'WhatsApp';
+  if (type.includes('Twitter')) return 'Twitter';
+  if (type.includes('Email')) return 'Email';
+  if (type.includes('Sms')) return 'SMS';
+  if (type.includes('Api')) return 'API';
+  if (type.includes('Facebook')) return 'Facebook';
+  if (type.includes('Telegram')) return 'Telegram';
+  return 'Chat';
+}
+
 router.post('/', async (req: Request, res: Response) => {
   const body = req.body;
   const eventType: string = body.event;
 
-  // Only cluster on new conversations (first message). message_created fires for every
-  // reply in the thread — we don't re-embed those. conversation_status_changed is
-  // acknowledged but triggers no clustering.
-  if (!['conversation_created', 'conversation_status_changed'].includes(eventType)) {
+  if (!['message_created', 'conversation_status_changed'].includes(eventType)) {
     res.status(200).json({ ignored: true });
     return;
   }
 
   try {
-    let event: SupportEvent | null = null;
-
-    if (eventType === 'conversation_created') {
-      // message_type 0 = incoming (customer), 1 = outgoing (agent), 2 = activity
-      // Only embed the customer's message — ignore canned replies and agent messages
-      const messages: { content?: string; message_type?: number; private?: boolean }[] =
-        body.messages ?? [];
-      const customerMessage = messages.find(
-        (m) => m.message_type === 0 && !m.private && m.content?.trim()
-      );
-      const firstMessage: string = customerMessage?.content ?? '';
-      if (!firstMessage.trim()) {
+    if (eventType === 'message_created') {
+      // Only process incoming customer messages (message_type 0), not agent replies or activity
+      if (body.message_type !== 0 || body.private === true) {
         res.status(200).json({ ignored: true });
         return;
       }
 
-      event = {
+      const content: string = body.content ?? '';
+      if (!content.trim()) {
+        res.status(200).json({ ignored: true });
+        return;
+      }
+
+      const conversationId = String(body.conversation?.id ?? '');
+      if (!conversationId) {
+        res.status(200).json({ ignored: true });
+        return;
+      }
+
+      // Only cluster the first customer message per conversation
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM support_events WHERE external_id = $1 AND source = 'chatwoot' LIMIT 1`,
+        [conversationId]
+      );
+      if (existing) {
+        res.status(200).json({ ignored: true, reason: 'already_clustered' });
+        return;
+      }
+
+      const inboxName = friendlyInboxName(
+        body.inbox?.name,
+        body.conversation?.meta?.channel
+      );
+
+      const event: SupportEvent = {
         id: uuidv4(),
         source: 'chatwoot',
         channel: 'chat',
-        externalId: String(body.id ?? ''),
-        contactName: body.meta?.sender?.name ?? 'Unknown',
-        content: firstMessage,
-        status: mapStatus(body.status ?? 'open'),
+        externalId: conversationId,
+        contactName: body.conversation?.meta?.sender?.name ?? body.sender?.name ?? 'Unknown',
+        content,
+        status: mapStatus(body.conversation?.status ?? 'open'),
         receivedAt: new Date(body.created_at ? body.created_at * 1000 : Date.now()),
         clusterId: null,
         clusterLabel: null,
         severity: null,
+        inboxName,
       };
-    } else if (eventType === 'conversation_status_changed') {
+
+      setLastWebhookReceived(new Date());
+      processEvent(event).catch((err) =>
+        console.error('Clustering error for chatwoot event:', err)
+      );
+
+      res.status(200).json({ ok: true, eventId: event.id });
+      return;
+    }
+
+    if (eventType === 'conversation_status_changed') {
       const conversationId = String(body.id ?? '');
       const newStatus = mapStatus(body.status ?? 'open');
       if (conversationId) {
@@ -69,18 +114,7 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!event) {
-      res.status(200).json({ ignored: true });
-      return;
-    }
-
-    setLastWebhookReceived(new Date());
-    // Fire-and-forget clustering; respond immediately
-    processEvent(event).catch((err) =>
-      console.error('Clustering error for chatwoot event:', err)
-    );
-
-    res.status(200).json({ ok: true, eventId: event.id });
+    res.status(200).json({ ignored: true });
   } catch (err) {
     console.error('Chatwoot webhook error:', err);
     res.status(500).json({ error: 'Internal server error' });

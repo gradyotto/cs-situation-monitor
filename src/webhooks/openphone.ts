@@ -54,6 +54,7 @@ router.post('/', async (req: Request, res: Response) => {
         clusterId: null,
         clusterLabel: null,
         severity: null,
+        inboxName: null,
       };
     } else if (eventType === 'message.received') {
       const data = body.data ?? body;
@@ -75,6 +76,7 @@ router.post('/', async (req: Request, res: Response) => {
         clusterId: null,
         clusterLabel: null,
         severity: null,
+        inboxName: null,
       };
     } else {
       res.status(200).json({ ignored: true });

@@ -88,8 +88,8 @@ async function applyLabelToChatwoot(event: SupportEvent, slug: string): Promise<
 async function persistEvent(event: SupportEvent): Promise<void> {
   await query(
     `INSERT INTO support_events
-       (id, source, channel, external_id, contact_name, content, status, embedding, cluster_id, severity, received_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10)`,
+       (id, source, channel, external_id, contact_name, content, status, embedding, cluster_id, severity, received_at, inbox_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10, $11)`,
     [
       event.id,
       event.source,
@@ -101,6 +101,7 @@ async function persistEvent(event: SupportEvent): Promise<void> {
       event.clusterId,
       event.severity,
       event.receivedAt,
+      event.inboxName ?? null,
     ]
   );
 }

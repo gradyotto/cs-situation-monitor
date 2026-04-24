@@ -87,7 +87,7 @@ async function buildDashboardState(): Promise<DashboardState> {
   interface EventRow {
     id: string; source: string; channel: string; external_id: string;
     contact_name: string; content: string; status: string;
-    cluster_id: string; severity: string; received_at: Date;
+    cluster_id: string; severity: string; received_at: Date; inbox_name: string | null;
   }
 
   const clusters = await query<ClusterRow>(
@@ -97,7 +97,7 @@ async function buildDashboardState(): Promise<DashboardState> {
 
   const recentEvents = await query<EventRow>(
     `SELECT id, source, channel, external_id, contact_name, content, status,
-            cluster_id, severity, received_at
+            cluster_id, severity, received_at, inbox_name
      FROM support_events ORDER BY received_at DESC LIMIT 20`
   );
 
@@ -107,12 +107,27 @@ async function buildDashboardState(): Promise<DashboardState> {
   const criticalCount = clusters.filter((c) => c.severity === 'high').length;
   const { clusteredToday, labelsAppliedToday } = getClusteringStats();
 
+  const mapEvent = (e: EventRow) => ({
+    id: e.id,
+    source: e.source as 'chatwoot' | 'openphone',
+    channel: e.channel as 'chat' | 'call' | 'sms',
+    externalId: e.external_id,
+    contactName: e.contact_name ?? 'Unknown',
+    content: e.content,
+    status: e.status as 'open' | 'pending' | 'resolved',
+    receivedAt: e.received_at,
+    clusterId: e.cluster_id ?? null,
+    clusterLabel: null,
+    severity: (e.severity as 'high' | 'medium' | 'low') ?? null,
+    inboxName: e.inbox_name ?? null,
+  });
+
   // Fetch events per cluster (last 10 each)
   const clustersWithEvents = await Promise.all(
     clusters.map(async (c) => {
       const events = await query<EventRow>(
         `SELECT id, source, channel, external_id, contact_name, content, status,
-                cluster_id, severity, received_at
+                cluster_id, severity, received_at, inbox_name
          FROM support_events WHERE cluster_id = $1
          ORDER BY received_at DESC LIMIT 10`,
         [c.id]
@@ -126,19 +141,7 @@ async function buildDashboardState(): Promise<DashboardState> {
         severity: (c.severity as 'high' | 'medium' | 'low') ?? null,
         createdAt: c.created_at,
         updatedAt: c.updated_at,
-        events: events.map((e) => ({
-          id: e.id,
-          source: e.source as 'chatwoot' | 'openphone',
-          channel: e.channel as 'chat' | 'call' | 'sms',
-          externalId: e.external_id,
-          contactName: e.contact_name ?? 'Unknown',
-          content: e.content,
-          status: e.status as 'open' | 'pending' | 'resolved',
-          receivedAt: e.received_at,
-          clusterId: e.cluster_id ?? null,
-          clusterLabel: null,
-          severity: (e.severity as 'high' | 'medium' | 'low') ?? null,
-        })),
+        events: events.map(mapEvent),
       };
     })
   );
@@ -151,19 +154,7 @@ async function buildDashboardState(): Promise<DashboardState> {
       criticalClusters: criticalCount,
       avgFirstResponseMinutes: 0,
     },
-    recentEvents: recentEvents.map((e) => ({
-      id: e.id,
-      source: e.source as 'chatwoot' | 'openphone',
-      channel: e.channel as 'chat' | 'call' | 'sms',
-      externalId: e.external_id,
-      contactName: e.contact_name ?? 'Unknown',
-      content: e.content,
-      status: e.status as 'open' | 'pending' | 'resolved',
-      receivedAt: e.received_at,
-      clusterId: e.cluster_id ?? null,
-      clusterLabel: null,
-      severity: (e.severity as 'high' | 'medium' | 'low') ?? null,
-    })),
+    recentEvents: recentEvents.map(mapEvent),
     clusteringStatus: {
       model: 'claude-haiku-4-5-20251001',
       threshold: config.clustering.threshold,

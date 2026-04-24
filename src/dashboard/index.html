@@ -180,8 +180,10 @@ function severityBadge(s) {
   return s ? `<span class="badge ${s}">${s.toUpperCase()}</span>` : '';
 }
 
-function channelBadge(ch) {
-  return ch ? `<span class="badge ${ch}">${ch}</span>` : '';
+function channelBadge(ch, inboxName) {
+  if (!ch) return '';
+  const label = inboxName || ch.toUpperCase();
+  return `<span class="badge ${ch}">${esc(label)}</span>`;
 }
 
 function timeAgo(d) {
@@ -200,7 +202,7 @@ function renderClusters() {
     const pct = Math.round((c.conversationCount / maxCount) * 100);
     const eventsHtml = (c.events || []).slice(0,10).map(e => `
       <div class="event-row">
-        ${channelBadge(e.channel)}
+        ${channelBadge(e.channel, e.inboxName)}
         <div class="event-content">
           <div class="event-contact">${esc(e.contactName || 'Unknown')}</div>
           <div class="event-preview">${esc((e.content||'').slice(0,80))}</div>
@@ -231,7 +233,7 @@ function renderFeed() {
   list.innerHTML = events.map(e => `
     <div class="feed-item">
       <div>
-        <div class="meta">${channelBadge(e.channel)} ${severityBadge(e.severity)}</div>
+        <div class="meta">${channelBadge(e.channel, e.inboxName)} ${severityBadge(e.severity)}</div>
         <div class="feed-contact">${esc(e.contactName || 'Unknown')}</div>
         <div class="feed-preview">${esc((e.content||'').slice(0,100))}</div>
       </div>

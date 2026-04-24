@@ -10,6 +10,7 @@ export interface SupportEvent {
   clusterId: string | null;
   clusterLabel: string | null;
   severity: 'high' | 'medium' | 'low' | null;
+  inboxName: string | null;
 }
 
 export interface Cluster {
