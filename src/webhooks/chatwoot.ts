@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
 import { SupportEvent } from '../types';
 import { processEvent } from '../clustering/engine';
-import { setLastWebhookReceived } from '../db/client';
+import { query, setLastWebhookReceived } from '../db/client';
 
 const router = Router();
 
@@ -49,7 +49,14 @@ router.post('/', async (req: Request, res: Response) => {
         severity: null,
       };
     } else if (eventType === 'conversation_status_changed') {
-      // Update existing conversation status — no new event to cluster
+      const conversationId = String(body.id ?? '');
+      const newStatus = mapStatus(body.status ?? 'open');
+      if (conversationId) {
+        await query(
+          `UPDATE support_events SET status = $1 WHERE external_id = $2 AND source = 'chatwoot'`,
+          [newStatus, conversationId]
+        );
+      }
       setLastWebhookReceived(new Date());
       res.status(200).json({ ok: true });
       return;
