@@ -14,12 +14,6 @@ function mapStatus(status: string): SupportEvent['status'] {
 }
 
 router.post('/', async (req: Request, res: Response) => {
-  const token = req.headers['api_access_token'] as string;
-  if (config.chatwoot.apiToken && token !== config.chatwoot.apiToken) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
   const body = req.body;
   const eventType: string = body.event;
 
