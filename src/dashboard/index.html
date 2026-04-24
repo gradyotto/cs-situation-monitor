@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OmniCommerce Support Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Courier New",Courier,monospace;background:#f8f9fa;color:#1a1a2e;font-size:13px}
+header{background:#1a1a2e;color:#e2e8f0;padding:10px 20px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:15px;letter-spacing:.5px}
+#ws-status{font-size:11px;padding:3px 8px;border-radius:3px;background:#374151}
+#ws-status.connected{background:#166534;color:#bbf7d0}
+#ws-status.disconnected{background:#991b1b;color:#fee2e2}
+.metrics-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#e5e7eb;border-bottom:1px solid #e5e7eb}
+.metric{background:#fff;padding:10px 16px}
+.metric .label{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px}
+.metric .value{font-size:22px;font-weight:700;margin-top:2px}
+.metric .value.critical{color:#dc2626}
+.main{display:flex;height:calc(100vh - 95px)}
+.clusters-panel{width:65%;border-right:1px solid #e5e7eb;overflow-y:auto;padding:12px}
+.right-panel{width:35%;display:flex;flex-direction:column}
+.panel-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb}
+.cluster-row{border:1px solid #e5e7eb;border-radius:4px;margin-bottom:6px;overflow:hidden;background:#fff}
+.cluster-header{padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.cluster-header:hover{background:#f9fafb}
+.cluster-label{flex:1;font-weight:600;font-size:12px}
+.cluster-count{font-size:11px;color:#6b7280;margin-right:4px}
+.badge{padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase}
+.badge.high{background:#fee2e2;color:#991b1b}
+.badge.medium{background:#fef3c7;color:#92400e}
+.badge.low{background:#dcfce7;color:#166534}
+.badge.chat{background:#dbeafe;color:#1e40af}
+.badge.call{background:#f3e8ff;color:#6b21a8}
+.badge.sms{background:#fce7f3;color:#9d174d}
+.fill-bar{height:3px;background:#e5e7eb;margin:0 12px 8px}
+.fill-bar-inner{height:100%;background:#3b82f6;transition:width .3s}
+.cluster-events{display:none;border-top:1px solid #e5e7eb}
+.cluster-events.open{display:block}
+.event-row{padding:7px 12px;border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:flex-start}
+.event-row:last-child{border-bottom:none}
+.event-content{flex:1;line-height:1.4}
+.event-contact{font-weight:600;font-size:11px}
+.event-preview{color:#4b5563;font-size:11px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px}
+.event-time{font-size:10px;color:#9ca3af;white-space:nowrap}
+.tabs{display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb}
+.tab{padding:7px 14px;cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent}
+.tab.active{color:#1a1a2e;border-bottom-color:#3b82f6}
+.tab-content{display:none;overflow-y:auto;flex:1}
+.tab-content.active{display:block}
+.feed-item{padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:flex-start}
+.feed-item .meta{display:flex;gap:4px;align-items:center}
+.feed-contact{font-weight:600;font-size:11px}
+.feed-preview{font-size:11px;color:#4b5563;margin-top:2px;word-break:break-word}
+.feed-time{font-size:10px;color:#9ca3af;white-space:nowrap;margin-left:auto}
+.channel-bar{padding:12px}
+.channel-row{margin-bottom:10px}
+.channel-row .name{font-size:11px;font-weight:600;margin-bottom:3px;display:flex;justify-content:space-between}
+.channel-fill{height:10px;border-radius:2px;background:#3b82f6}
+.status-card{border-top:1px solid #e5e7eb;padding:10px 12px;font-size:11px;line-height:1.8;background:#f9fafb}
+.status-row{display:flex;justify-content:space-between}
+.status-val{font-weight:700}
+.empty{padding:16px 12px;color:#9ca3af;font-size:11px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>OmniCommerce Support Intelligence</h1>
+  <div id="ws-status" class="disconnected">● DISCONNECTED</div>
+</header>
+
+<div class="metrics-bar">
+  <div class="metric"><div class="label">Open Conversations</div><div class="value" id="m-open">—</div></div>
+  <div class="metric"><div class="label">Active Clusters</div><div class="value" id="m-clusters">—</div></div>
+  <div class="metric"><div class="label">Avg Response</div><div class="value" id="m-response">—</div></div>
+  <div class="metric"><div class="label">Critical Clusters</div><div class="value critical" id="m-critical">—</div></div>
+</div>
+
+<div class="main">
+  <div class="clusters-panel">
+    <div class="panel-title">Issue Clusters</div>
+    <div id="clusters-list"><div class="empty">No clusters yet — waiting for events</div></div>
+  </div>
+
+  <div class="right-panel">
+    <div class="tabs">
+      <div class="tab active" data-tab="feed">Live Feed</div>
+      <div class="tab" data-tab="channels">Channels</div>
+      <div class="tab" data-tab="status">Engine Status</div>
+    </div>
+
+    <div class="tab-content active" id="tab-feed">
+      <div id="feed-list"><div class="empty">No events yet</div></div>
+    </div>
+
+    <div class="tab-content" id="tab-channels">
+      <div class="channel-bar" id="channel-bars">
+        <div class="empty">No channel data</div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-status">
+      <div class="status-card" id="engine-status">
+        <div class="status-row"><span>Model</span><span class="status-val" id="s-model">—</span></div>
+        <div class="status-row"><span>Threshold</span><span class="status-val" id="s-threshold">—</span></div>
+        <div class="status-row"><span>Avg embed latency</span><span class="status-val" id="s-latency">—</span></div>
+        <div class="status-row"><span>Clustered today</span><span class="status-val" id="s-clustered">—</span></div>
+        <div class="status-row"><span>Labels applied today</span><span class="status-val" id="s-labels">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const WS_URL = `ws://${location.host}/ws`;
+let state = { clusters: [], recentEvents: [], metrics: {}, clusteringStatus: {} };
+let ws, reconnectTimer;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('ws-status').className = 'connected';
+    document.getElementById('ws-status').textContent = '● LIVE';
+    clearTimeout(reconnectTimer);
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-status').className = 'disconnected';
+    document.getElementById('ws-status').textContent = '● DISCONNECTED';
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'state') { state = msg.payload; render(); }
+    else if (msg.type === 'event') { addFeedEvent(msg.payload); }
+    else if (msg.type === 'cluster_update') { updateCluster(msg.payload); }
+  };
+}
+
+function updateCluster(c) {
+  const idx = state.clusters.findIndex(x => x.id === c.id);
+  if (idx >= 0) Object.assign(state.clusters[idx], c);
+  else state.clusters.push({ ...c, events: [] });
+  state.clusters.sort((a, b) => b.conversationCount - a.conversationCount);
+  renderClusters();
+  renderMetrics();
+  renderChannelBars();
+}
+
+function addFeedEvent(ev) {
+  state.recentEvents.unshift(ev);
+  if (state.recentEvents.length > 20) state.recentEvents.pop();
+  if (state.clusters) {
+    const cluster = state.clusters.find(c => c.id === ev.clusterId);
+    if (cluster) { cluster.events = cluster.events || []; cluster.events.unshift(ev); }
+  }
+  renderFeed();
+  renderClusters();
+}
+
+function render() {
+  renderMetrics();
+  renderClusters();
+  renderFeed();
+  renderChannelBars();
+  renderEngineStatus();
+}
+
+function renderMetrics() {
+  const m = state.metrics || {};
+  const clusters = state.clusters || [];
+  document.getElementById('m-open').textContent = m.openConversations ?? clusters.reduce((s,c)=>s+(c.events||[]).filter(e=>e.status==='open').length,0) || '0';
+  document.getElementById('m-clusters').textContent = clusters.length;
+  document.getElementById('m-response').textContent = m.avgFirstResponseMinutes > 0 ? `${m.avgFirstResponseMinutes}m` : 'N/A';
+  const critical = clusters.filter(c => c.severity === 'high').length;
+  document.getElementById('m-critical').textContent = critical;
+}
+
+function severityBadge(s) {
+  return s ? `<span class="badge ${s}">${s.toUpperCase()}</span>` : '';
+}
+
+function channelBadge(ch) {
+  return ch ? `<span class="badge ${ch}">${ch}</span>` : '';
+}
+
+function timeAgo(d) {
+  const s = Math.floor((Date.now() - new Date(d)) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  return `${Math.floor(s/3600)}h ago`;
+}
+
+function renderClusters() {
+  const list = document.getElementById('clusters-list');
+  const clusters = state.clusters || [];
+  if (!clusters.length) { list.innerHTML = '<div class="empty">No clusters yet — waiting for events</div>'; return; }
+  const maxCount = Math.max(...clusters.map(c => c.conversationCount), 1);
+  list.innerHTML = clusters.map((c, i) => {
+    const pct = Math.round((c.conversationCount / maxCount) * 100);
+    const eventsHtml = (c.events || []).slice(0,10).map(e => `
+      <div class="event-row">
+        ${channelBadge(e.channel)}
+        <div class="event-content">
+          <div class="event-contact">${esc(e.contactName || 'Unknown')}</div>
+          <div class="event-preview">${esc((e.content||'').slice(0,80))}</div>
+        </div>
+        <div class="event-time">${timeAgo(e.receivedAt)}</div>
+      </div>`).join('');
+    return `<div class="cluster-row">
+      <div class="cluster-header" onclick="toggleCluster(${i})">
+        <div class="cluster-label">${esc(c.label || c.slug || 'Cluster')}</div>
+        <span class="cluster-count">${c.conversationCount} conv</span>
+        ${severityBadge(c.severity)}
+      </div>
+      <div class="fill-bar"><div class="fill-bar-inner" style="width:${pct}%"></div></div>
+      <div class="cluster-events" id="ce-${i}">${eventsHtml || '<div class="empty">No events loaded</div>'}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCluster(i) {
+  const el = document.getElementById(`ce-${i}`);
+  if (el) el.classList.toggle('open');
+}
+
+function renderFeed() {
+  const list = document.getElementById('feed-list');
+  const events = state.recentEvents || [];
+  if (!events.length) { list.innerHTML = '<div class="empty">No events yet</div>'; return; }
+  list.innerHTML = events.map(e => `
+    <div class="feed-item">
+      <div>
+        <div class="meta">${channelBadge(e.channel)} ${severityBadge(e.severity)}</div>
+        <div class="feed-contact">${esc(e.contactName || 'Unknown')}</div>
+        <div class="feed-preview">${esc((e.content||'').slice(0,100))}</div>
+      </div>
+      <div class="feed-time">${timeAgo(e.receivedAt)}</div>
+    </div>`).join('');
+}
+
+function renderChannelBars() {
+  const events = (state.clusters || []).flatMap(c => c.events || []).concat(state.recentEvents || []);
+  const deduped = [...new Map(events.map(e => [e.id, e])).values()];
+  const counts = { chat: 0, call: 0, sms: 0 };
+  for (const e of deduped) { if (e.channel in counts) counts[e.channel]++; }
+  const total = counts.chat + counts.call + counts.sms || 1;
+  const bars = document.getElementById('channel-bars');
+  bars.innerHTML = [['chat','#3b82f6'],['call','#8b5cf6'],['sms','#ec4899']].map(([ch, color]) => `
+    <div class="channel-row">
+      <div class="name"><span>${ch.charAt(0).toUpperCase()+ch.slice(1)}</span><span>${counts[ch]}</span></div>
+      <div style="background:#e5e7eb;border-radius:2px;height:10px"><div style="width:${Math.round(counts[ch]/total*100)}%;background:${color};height:10px;border-radius:2px"></div></div>
+    </div>`).join('');
+}
+
+function renderEngineStatus() {
+  const s = state.clusteringStatus || {};
+  document.getElementById('s-model').textContent = s.model || 'claude-haiku-4-5-20251001';
+  document.getElementById('s-threshold').textContent = s.threshold != null ? s.threshold : '0.82';
+  document.getElementById('s-latency').textContent = s.avgEmbedLatencyMs > 0 ? `${s.avgEmbedLatencyMs}ms` : 'N/A';
+  document.getElementById('s-clustered').textContent = s.clusteredToday ?? '0';
+  document.getElementById('s-labels').textContent = s.labelsAppliedToday ?? '0';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+  });
+});
+
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+import { Router, Request, Response } from 'express';
+import { createHmac } from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
+import { config } from '../config';
+import { SupportEvent } from '../types';
+import { processEvent } from '../clustering/engine';
+import { setLastWebhookReceived } from '../db/client';
+
+const router = Router();
+
+function verifySignature(req: Request): boolean {
+  if (!config.openphone.webhookSecret) return true;
+  const signature = req.headers['x-openphone-signature'] as string;
+  if (!signature) return false;
+  const expected = createHmac('sha256', config.openphone.webhookSecret)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+  return signature === expected;
+}
+
+router.post('/', async (req: Request, res: Response) => {
+  if (!verifySignature(req)) {
+    res.status(401).json({ error: 'Invalid signature' });
+    return;
+  }
+
+  const body = req.body;
+  const eventType: string = body.type ?? body.event ?? '';
+
+  try {
+    let event: SupportEvent | null = null;
+
+    if (eventType === 'call.completed') {
+      const data = body.data ?? body;
+      const summary: string = data.summary ?? data.object?.summary ?? '';
+
+      // Skip calls with no summary — a bare "Call from X — 30s" carries no semantic
+      // signal worth embedding and would pollute cluster centroids.
+      if (!summary.trim()) {
+        setLastWebhookReceived(new Date());
+        res.status(200).json({ ignored: true, reason: 'no_summary' });
+        return;
+      }
+
+      event = {
+        id: uuidv4(),
+        source: 'openphone',
+        channel: 'call',
+        externalId: String(data.id ?? data.object?.id ?? uuidv4()),
+        contactName: data.from ?? data.object?.from ?? 'Unknown Caller',
+        content: summary,
+        status: 'resolved',
+        receivedAt: new Date(data.completedAt ?? data.object?.completedAt ?? Date.now()),
+        clusterId: null,
+        clusterLabel: null,
+        severity: null,
+      };
+    } else if (eventType === 'message.received') {
+      const data = body.data ?? body;
+      const msgBody: string = data.body ?? data.object?.body ?? '';
+      if (!msgBody.trim()) {
+        res.status(200).json({ ignored: true });
+        return;
+      }
+
+      event = {
+        id: uuidv4(),
+        source: 'openphone',
+        channel: 'sms',
+        externalId: String(data.id ?? data.object?.id ?? uuidv4()),
+        contactName: data.from ?? data.object?.from ?? 'Unknown',
+        content: msgBody,
+        status: 'open',
+        receivedAt: new Date(data.receivedAt ?? data.object?.receivedAt ?? Date.now()),
+        clusterId: null,
+        clusterLabel: null,
+        severity: null,
+      };
+    } else {
+      res.status(200).json({ ignored: true });
+      return;
+    }
+
+    if (!event) {
+      res.status(200).json({ ignored: true });
+      return;
+    }
+
+    setLastWebhookReceived(new Date());
+    processEvent(event).catch((err) =>
+      console.error('Clustering error for openphone event:', err)
+    );
+
+    res.status(200).json({ ok: true, eventId: event.id });
+  } catch (err) {
+    console.error('OpenPhone webhook error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+export default router;
