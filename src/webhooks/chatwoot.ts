@@ -29,7 +29,14 @@ router.post('/', async (req: Request, res: Response) => {
     let event: SupportEvent | null = null;
 
     if (eventType === 'conversation_created') {
-      const firstMessage: string = body.messages?.[0]?.content ?? body.content ?? '';
+      // message_type 0 = incoming (customer), 1 = outgoing (agent), 2 = activity
+      // Only embed the customer's message — ignore canned replies and agent messages
+      const messages: { content?: string; message_type?: number; private?: boolean }[] =
+        body.messages ?? [];
+      const customerMessage = messages.find(
+        (m) => m.message_type === 0 && !m.private && m.content?.trim()
+      );
+      const firstMessage: string = customerMessage?.content ?? '';
       if (!firstMessage.trim()) {
         res.status(200).json({ ignored: true });
         return;
