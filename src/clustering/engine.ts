@@ -83,13 +83,13 @@ async function applyLabelToChatwoot(event: SupportEvent, slug: string): Promise<
   }
 }
 
-/** Persist a new SupportEvent to the DB */
-async function persistEvent(event: SupportEvent, embedding: number[]): Promise<void> {
-  const pgVector = `[${embedding.join(',')}]`;
+/** Persist a new SupportEvent to the DB — embedding is not stored after cluster
+ *  assignment to avoid accumulating large vector data (1536 floats per row). */
+async function persistEvent(event: SupportEvent): Promise<void> {
   await query(
     `INSERT INTO support_events
        (id, source, channel, external_id, contact_name, content, status, embedding, cluster_id, severity, received_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10, $11)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10)`,
     [
       event.id,
       event.source,
@@ -98,7 +98,6 @@ async function persistEvent(event: SupportEvent, embedding: number[]): Promise<v
       event.contactName,
       event.content,
       event.status,
-      pgVector,
       event.clusterId,
       event.severity,
       event.receivedAt,
@@ -200,8 +199,8 @@ export async function processEvent(event: SupportEvent): Promise<void> {
   event.clusterLabel = assignedClusterLabel;
   event.severity = await computeSeverity(assignedClusterId);
 
-  // 4. Persist event
-  await persistEvent(event, embedding);
+  // 4. Persist event (embedding discarded after cluster assignment)
+  await persistEvent(event);
 
   clusteredToday++;
 
