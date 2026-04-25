@@ -43,21 +43,26 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     if (eventType === 'message_created') {
-      // Only process incoming customer messages (message_type 0), not agent replies or activity
-      if (body.message_type !== 0 || body.private === true) {
-        res.status(200).json({ ignored: true });
+      const messageType = body.message_type;
+      const isIncoming = messageType === 0 || messageType === '0' || messageType === 'incoming';
+
+      console.log(`[chatwoot] message_created — type: ${JSON.stringify(messageType)}, private: ${body.private}, content: ${String(body.content ?? '').slice(0, 60)}`);
+
+      // Only process incoming customer messages, not agent replies or activity
+      if (!isIncoming || body.private === true) {
+        res.status(200).json({ ignored: true, reason: `message_type=${messageType}` });
         return;
       }
 
       const content: string = body.content ?? '';
       if (!content.trim()) {
-        res.status(200).json({ ignored: true });
+        res.status(200).json({ ignored: true, reason: 'empty_content' });
         return;
       }
 
       const conversationId = String(body.conversation?.id ?? '');
       if (!conversationId) {
-        res.status(200).json({ ignored: true });
+        res.status(200).json({ ignored: true, reason: 'no_conversation_id' });
         return;
       }
 
