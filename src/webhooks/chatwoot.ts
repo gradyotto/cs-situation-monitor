@@ -36,7 +36,7 @@ router.post('/', async (req: Request, res: Response) => {
   const body = req.body;
   const eventType: string = body.event;
 
-  if (!['message_created', 'conversation_status_changed'].includes(eventType)) {
+  if (!['message_created', 'conversation_status_changed', 'conversation_updated'].includes(eventType)) {
     res.status(200).json({ ignored: true });
     return;
   }
@@ -113,6 +113,23 @@ router.post('/', async (req: Request, res: Response) => {
       );
 
       res.status(200).json({ ok: true, eventId: event.id });
+      return;
+    }
+
+    if (eventType === 'conversation_updated') {
+      const conversationId = String(body.id ?? '');
+      const rawLabels: unknown = body.labels;
+      const labels: string[] = Array.isArray(rawLabels)
+        ? rawLabels.filter((l): l is string => typeof l === 'string')
+        : [];
+      if (conversationId && labels.length > 0) {
+        await query(
+          `UPDATE support_events SET labels = $1 WHERE external_id = $2 AND source = 'chatwoot'`,
+          [labels, conversationId]
+        );
+      }
+      setLastWebhookReceived(new Date());
+      res.status(200).json({ ok: true });
       return;
     }
 
