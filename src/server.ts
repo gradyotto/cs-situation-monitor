@@ -166,18 +166,16 @@ async function buildDashboardState(): Promise<DashboardState> {
     inboxName: e.inbox_name ?? null,
   });
 
-  // Fetch events for all active clusters in a single query (avoids N concurrent connections)
-  const clusterIds = clusters.map((c) => c.id);
-  const allClusterEvents = clusterIds.length > 0
+  // Fetch last 10 events per cluster in one query; filter to active clusters via Map lookup below
+  const allClusterEvents = clusters.length > 0
     ? await query<EventRow>(
         `SELECT id, source, channel, external_id, contact_name, content, status,
                 cluster_id, severity, received_at, inbox_name
          FROM (
            SELECT *, ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY received_at DESC) AS rn
            FROM support_events
-           WHERE cluster_id = ANY($1::uuid[])
-         ) t WHERE rn <= 10`,
-        [clusterIds]
+           WHERE cluster_id IS NOT NULL
+         ) t WHERE rn <= 10`
       )
     : [];
 
