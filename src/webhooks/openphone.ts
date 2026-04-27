@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
 import { SupportEvent } from '../types';
 import { processEvent } from '../clustering/engine';
-import { setLastWebhookReceived } from '../db/client';
+import { queryOne, setLastWebhookReceived } from '../db/client';
 
 function openphoneSegment(data: Record<string, unknown>): 'customer' | 'driver' {
   const id = (data.phoneNumberId ?? (data.object as Record<string, unknown> | undefined)?.phoneNumberId) as string | undefined;
@@ -37,23 +37,32 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     let event: SupportEvent | null = null;
 
-    if (eventType === 'call.completed') {
+    if (eventType === 'call.completed' || eventType === 'call.summary.completed') {
       const data = body.data ?? body;
       const summary: string = data.summary ?? data.object?.summary ?? '';
 
-      // Skip calls with no summary — a bare "Call from X — 30s" carries no semantic
-      // signal worth embedding and would pollute cluster centroids.
       if (!summary.trim()) {
         setLastWebhookReceived(new Date());
         res.status(200).json({ ignored: true, reason: 'no_summary' });
         return;
       }
 
+      const externalId = String(data.id ?? data.object?.id ?? uuidv4());
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM support_events WHERE external_id = $1 AND source = 'openphone' LIMIT 1`,
+        [externalId]
+      );
+      if (existing) {
+        res.status(200).json({ ignored: true, reason: 'already_clustered' });
+        return;
+      }
+
+      const seg = openphoneSegment(data);
       event = {
         id: uuidv4(),
         source: 'openphone',
         channel: 'call',
-        externalId: String(data.id ?? data.object?.id ?? uuidv4()),
+        externalId,
         contactName: data.from ?? data.object?.from ?? 'Unknown Caller',
         content: summary,
         status: 'resolved',
@@ -61,9 +70,9 @@ router.post('/', async (req: Request, res: Response) => {
         clusterId: null,
         clusterLabel: null,
         severity: null,
-        inboxName: 'Driver Phone',
+        inboxName: seg === 'driver' ? 'Driver Phone' : 'Phone',
         labels: [],
-        segment: openphoneSegment(data),
+        segment: seg,
       };
     } else if (eventType === 'message.received') {
       const data = body.data ?? body;
@@ -73,11 +82,22 @@ router.post('/', async (req: Request, res: Response) => {
         return;
       }
 
+      const externalId = String(data.id ?? data.object?.id ?? uuidv4());
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM support_events WHERE external_id = $1 AND source = 'openphone' LIMIT 1`,
+        [externalId]
+      );
+      if (existing) {
+        res.status(200).json({ ignored: true, reason: 'already_clustered' });
+        return;
+      }
+
+      const seg = openphoneSegment(data);
       event = {
         id: uuidv4(),
         source: 'openphone',
         channel: 'sms',
-        externalId: String(data.id ?? data.object?.id ?? uuidv4()),
+        externalId,
         contactName: data.from ?? data.object?.from ?? 'Unknown',
         content: msgBody,
         status: 'open',
@@ -85,9 +105,9 @@ router.post('/', async (req: Request, res: Response) => {
         clusterId: null,
         clusterLabel: null,
         severity: null,
-        inboxName: 'Driver Phone',
+        inboxName: seg === 'driver' ? 'Driver Phone' : 'Phone',
         labels: [],
-        segment: openphoneSegment(data),
+        segment: seg,
       };
     } else {
       res.status(200).json({ ignored: true });
