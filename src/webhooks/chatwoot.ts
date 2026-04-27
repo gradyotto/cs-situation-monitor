@@ -89,7 +89,7 @@ router.post('/', async (req: Request, res: Response) => {
         contactName: body.conversation?.meta?.sender?.name ?? body.sender?.name ?? 'Unknown',
         content,
         status: mapStatus(body.conversation?.status ?? 'open'),
-        receivedAt: new Date(body.created_at ? body.created_at * 1000 : Date.now()),
+        receivedAt: new Date(Number.isFinite(Number(body.created_at)) ? Number(body.created_at) * 1000 : Date.now()),
         clusterId: null,
         clusterLabel: null,
         severity: null,
