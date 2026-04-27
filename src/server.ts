@@ -126,22 +126,23 @@ async function buildDashboardState(): Promise<DashboardState> {
   interface ClusterRow {
     id: string; label: string; slug: string;
     conversation_count: number; severity: string;
-    created_at: Date; updated_at: Date;
+    created_at: Date; updated_at: Date; segment: string;
   }
   interface EventRow {
     id: string; source: string; channel: string; external_id: string;
     contact_name: string; content: string; status: string;
     cluster_id: string; severity: string; received_at: Date; inbox_name: string | null;
+    labels: string[] | null; segment: string;
   }
 
   const clusters = await query<ClusterRow>(
-    `SELECT id, label, slug, conversation_count, severity, created_at, updated_at
+    `SELECT id, label, slug, conversation_count, severity, created_at, updated_at, segment
      FROM clusters WHERE archived_at IS NULL ORDER BY conversation_count DESC`
   );
 
   const recentEvents = await query<EventRow>(
     `SELECT id, source, channel, external_id, contact_name, content, status,
-            cluster_id, severity, received_at, inbox_name
+            cluster_id, severity, received_at, inbox_name, labels, segment
      FROM support_events ORDER BY received_at DESC LIMIT 20`
   );
 
@@ -164,13 +165,15 @@ async function buildDashboardState(): Promise<DashboardState> {
     clusterLabel: null,
     severity: (e.severity as 'high' | 'medium' | 'low') ?? null,
     inboxName: e.inbox_name ?? null,
+    labels: e.labels ?? [],
+    segment: (e.segment as 'customer' | 'driver') ?? 'customer',
   });
 
   // Fetch last 10 events per cluster in one query; filter to active clusters via Map lookup below
   const allClusterEvents = clusters.length > 0
     ? await query<EventRow>(
         `SELECT id, source, channel, external_id, contact_name, content, status,
-                cluster_id, severity, received_at, inbox_name
+                cluster_id, severity, received_at, inbox_name, labels, segment
          FROM (
            SELECT *, ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY received_at DESC) AS rn
            FROM support_events
@@ -195,6 +198,7 @@ async function buildDashboardState(): Promise<DashboardState> {
     severity: (c.severity as 'high' | 'medium' | 'low') ?? null,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
+    segment: (c.segment as 'customer' | 'driver') ?? 'customer',
     events: (eventsByCluster.get(c.id) ?? []).map(mapEvent),
   }));
 

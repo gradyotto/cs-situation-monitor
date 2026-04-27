@@ -6,6 +6,13 @@ import { SupportEvent } from '../types';
 import { processEvent } from '../clustering/engine';
 import { setLastWebhookReceived } from '../db/client';
 
+function openphoneSegment(data: Record<string, unknown>): 'customer' | 'driver' {
+  const id = (data.phoneNumberId ?? (data.object as Record<string, unknown> | undefined)?.phoneNumberId) as string | undefined;
+  return config.openphone.driverNumberId && id === config.openphone.driverNumberId
+    ? 'driver'
+    : 'customer';
+}
+
 const router = Router();
 
 function verifySignature(req: Request): boolean {
@@ -54,7 +61,9 @@ router.post('/', async (req: Request, res: Response) => {
         clusterId: null,
         clusterLabel: null,
         severity: null,
-        inboxName: null,
+        inboxName: 'Driver Phone',
+        labels: [],
+        segment: openphoneSegment(data),
       };
     } else if (eventType === 'message.received') {
       const data = body.data ?? body;
@@ -76,7 +85,9 @@ router.post('/', async (req: Request, res: Response) => {
         clusterId: null,
         clusterLabel: null,
         severity: null,
-        inboxName: null,
+        inboxName: 'Driver Phone',
+        labels: [],
+        segment: openphoneSegment(data),
       };
     } else {
       res.status(200).json({ ignored: true });

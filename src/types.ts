@@ -11,6 +11,8 @@ export interface SupportEvent {
   clusterLabel: string | null;
   severity: 'high' | 'medium' | 'low' | null;
   inboxName: string | null;
+  labels: string[];
+  segment: 'customer' | 'driver';
 }
 
 export interface Cluster {
@@ -22,6 +24,7 @@ export interface Cluster {
   severity: 'high' | 'medium' | 'low' | null;
   createdAt: Date;
   updatedAt: Date;
+  segment: 'customer' | 'driver';
 }
 
 export interface ClusterWithEvents extends Cluster {

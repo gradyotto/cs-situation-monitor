@@ -34,7 +34,8 @@ export async function embedContent(content: string): Promise<number[]> {
 /**
  * Ask Claude Haiku to generate a concise 3-5 word cluster label from message content.
  */
-export async function generateClusterLabel(content: string): Promise<string> {
+export async function generateClusterLabel(content: string, labels: string[] = []): Promise<string> {
+  const labelContext = labels.length > 0 ? `\nAgent-applied labels: ${labels.join(', ')}` : '';
   const response = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 32,
@@ -43,7 +44,7 @@ export async function generateClusterLabel(content: string): Promise<string> {
     messages: [
       {
         role: 'user',
-        content: `Generate a 3-5 word cluster label for: ${content}`,
+        content: `Generate a 3-5 word cluster label for: ${content}${labelContext}`,
       },
     ],
   });

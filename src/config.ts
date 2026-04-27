@@ -23,6 +23,7 @@ export const config = {
 
   openphone: {
     webhookSecret: optional('OPENPHONE_WEBHOOK_SECRET', ''),
+    driverNumberId: optional('DRIVER_OPENPHONE_NUMBER_ID', ''),
   },
 
   anthropic: {

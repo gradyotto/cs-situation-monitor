@@ -70,6 +70,11 @@ header h1{font-size:15px;letter-spacing:.5px}
 .archive-meta{font-size:11px;color:#9ca3af}
 .cluster-panel-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;padding:8px 12px;display:flex;justify-content:space-between;align-items:center}
 .archive-toggle{font-size:10px;color:#3b82f6;cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0}
+.segment-tabs{display:flex;gap:4px;padding:8px 12px 0;border-bottom:1px solid #e5e7eb;background:#fff}
+.seg-tab{padding:5px 14px;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid transparent;border-bottom:none;color:#6b7280;margin-bottom:-1px}
+.seg-tab.active{color:#1a1a2e;background:#fff;border-color:#e5e7eb;border-bottom-color:#fff}
+.event-labels{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+.label-tag{font-size:9px;padding:1px 5px;border-radius:2px;background:#f1f5f9;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
 </style>
 </head>
 <body>
@@ -90,6 +95,10 @@ header h1{font-size:15px;letter-spacing:.5px}
     <div class="cluster-panel-title">
       Issue Clusters
       <span class="archive-toggle" onclick="toggleArchive()">Show Archive</span>
+    </div>
+    <div class="segment-tabs">
+      <div class="seg-tab active" id="seg-customer" onclick="setSegment('customer')">Customer Issues</div>
+      <div class="seg-tab" id="seg-driver" onclick="setSegment('driver')">Driver Issues</div>
     </div>
     <div id="clusters-list"><div class="empty">No clusters yet — waiting for events</div></div>
     <div id="archive-section" style="display:none">
@@ -131,6 +140,16 @@ header h1{font-size:15px;letter-spacing:.5px}
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 let state = { clusters: [], recentEvents: [], metrics: {}, clusteringStatus: {} };
 let ws, reconnectTimer;
+let activeSegment = 'customer';
+
+function setSegment(seg) {
+  activeSegment = seg;
+  document.getElementById('seg-customer').classList.toggle('active', seg === 'customer');
+  document.getElementById('seg-driver').classList.toggle('active', seg === 'driver');
+  renderClusters();
+  renderMetrics();
+  renderChannelBars();
+}
 
 function connect() {
   ws = new WebSocket(WS_URL);
@@ -183,13 +202,12 @@ function render() {
 }
 
 function renderMetrics() {
-  const m = state.metrics || {};
-  const clusters = state.clusters || [];
-  document.getElementById('m-open').textContent = (m.openConversations ?? clusters.reduce((s,c)=>s+(c.events||[]).filter(e=>e.status==='open').length,0)) || '0';
+  const clusters = (state.clusters || []).filter(c => (c.segment || 'customer') === activeSegment);
+  const open = clusters.reduce((s,c)=>s+(c.events||[]).filter(e=>e.status==='open').length,0);
+  document.getElementById('m-open').textContent = open || '0';
   document.getElementById('m-clusters').textContent = clusters.length;
-  document.getElementById('m-response').textContent = m.avgFirstResponseMinutes > 0 ? `${m.avgFirstResponseMinutes}m` : 'N/A';
-  const critical = clusters.filter(c => c.severity === 'high').length;
-  document.getElementById('m-critical').textContent = critical;
+  document.getElementById('m-response').textContent = 'N/A';
+  document.getElementById('m-critical').textContent = clusters.filter(c => c.severity === 'high').length;
 }
 
 function severityBadge(s) {
@@ -211,20 +229,26 @@ function timeAgo(d) {
 
 function renderClusters() {
   const list = document.getElementById('clusters-list');
-  const clusters = state.clusters || [];
-  if (!clusters.length) { list.innerHTML = '<div class="empty">No clusters yet — waiting for events</div>'; return; }
+  const clusters = (state.clusters || []).filter(c => (c.segment || 'customer') === activeSegment);
+  if (!clusters.length) { list.innerHTML = `<div class="empty">No ${activeSegment} clusters yet — waiting for events</div>`; return; }
   const maxCount = Math.max(...clusters.map(c => c.conversationCount), 1);
   list.innerHTML = clusters.map((c, i) => {
     const pct = Math.round((c.conversationCount / maxCount) * 100);
-    const eventsHtml = (c.events || []).slice(0,10).map(e => `
+    const eventsHtml = (c.events || []).slice(0,10).map(e => {
+      const labelsHtml = (e.labels || []).length > 0
+        ? `<div class="event-labels">${(e.labels||[]).map(l=>`<span class="label-tag">${esc(l)}</span>`).join('')}</div>`
+        : '';
+      return `
       <div class="event-row">
         ${channelBadge(e.channel, e.inboxName)}
         <div class="event-content">
           <div class="event-contact">${esc(e.contactName || 'Unknown')}</div>
           <div class="event-preview">${esc((e.content||'').slice(0,80))}</div>
+          ${labelsHtml}
         </div>
         <div class="event-time">${timeAgo(e.receivedAt)}</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `<div class="cluster-row">
       <div class="cluster-header" onclick="toggleCluster(${i})">
         <div class="cluster-label">${esc(c.label || c.slug || 'Cluster')}</div>
@@ -259,7 +283,7 @@ function renderFeed() {
 }
 
 function renderChannelBars() {
-  const events = (state.clusters || []).flatMap(c => c.events || []).concat(state.recentEvents || []);
+  const events = (state.clusters || []).filter(c => (c.segment || 'customer') === activeSegment).flatMap(c => c.events || []).concat((state.recentEvents || []).filter(e => (e.segment || 'customer') === activeSegment));
   const deduped = [...new Map(events.map(e => [e.id, e])).values()];
   const counts = { chat: 0, call: 0, sms: 0 };
   for (const e of deduped) { if (e.channel in counts) counts[e.channel]++; }

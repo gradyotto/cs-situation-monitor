@@ -81,6 +81,15 @@ router.post('/', async (req: Request, res: Response) => {
         body.conversation?.meta?.channel
       );
 
+      const rawLabels: unknown = body.conversation?.labels;
+      const labels: string[] = Array.isArray(rawLabels)
+        ? rawLabels.filter((l): l is string => typeof l === 'string')
+        : [];
+
+      const segment = (body.inbox?.name as string | undefined)?.trim() === 'Stiiizy(Dx)'
+        ? 'driver' as const
+        : 'customer' as const;
+
       const event: SupportEvent = {
         id: uuidv4(),
         source: 'chatwoot',
@@ -94,6 +103,8 @@ router.post('/', async (req: Request, res: Response) => {
         clusterLabel: null,
         severity: null,
         inboxName,
+        labels,
+        segment,
       };
 
       setLastWebhookReceived(new Date());

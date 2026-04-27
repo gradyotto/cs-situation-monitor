@@ -88,8 +88,8 @@ async function applyLabelToChatwoot(event: SupportEvent, slug: string): Promise<
 async function persistEvent(event: SupportEvent): Promise<void> {
   await query(
     `INSERT INTO support_events
-       (id, source, channel, external_id, contact_name, content, status, embedding, cluster_id, severity, received_at, inbox_name)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10, $11)`,
+       (id, source, channel, external_id, contact_name, content, status, embedding, cluster_id, severity, received_at, inbox_name, labels, segment)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10, $11, $12, $13)`,
     [
       event.id,
       event.source,
@@ -102,6 +102,8 @@ async function persistEvent(event: SupportEvent): Promise<void> {
       event.severity,
       event.receivedAt,
       event.inboxName ?? null,
+      event.labels,
+      event.segment,
     ]
   );
 }
@@ -110,10 +112,13 @@ async function persistEvent(event: SupportEvent): Promise<void> {
 export async function processEvent(event: SupportEvent): Promise<void> {
   checkDailyReset();
 
-  // 1. Embed
-  const embedding = await embedContent(event.content);
+  // 1. Embed — include agent labels in text so they influence cluster similarity
+  const textToEmbed = event.labels.length > 0
+    ? `${event.content}\nAgent labels: ${event.labels.join(', ')}`
+    : event.content;
+  const embedding = await embedContent(textToEmbed);
 
-  // 2. Find best matching cluster by comparing against all cluster centroids
+  // 2. Find best matching cluster (same segment only)
   interface ClusterRow {
     id: string;
     label: string;
@@ -123,7 +128,8 @@ export async function processEvent(event: SupportEvent): Promise<void> {
   }
 
   const clusters = await query<ClusterRow>(
-    `SELECT id, label, slug, centroid::text, conversation_count FROM clusters`
+    `SELECT id, label, slug, centroid::text, conversation_count FROM clusters WHERE segment = $1`,
+    [event.segment]
   );
 
   let bestClusterId: string | null = null;
@@ -172,7 +178,7 @@ export async function processEvent(event: SupportEvent): Promise<void> {
     );
   } else {
     // 3b. Create new cluster
-    const label = await generateClusterLabel(event.content);
+    const label = await generateClusterLabel(event.content, event.labels);
     const slug = labelToSlug(label);
     assignedClusterId = uuidv4();
     assignedClusterLabel = label;
@@ -189,9 +195,9 @@ export async function processEvent(event: SupportEvent): Promise<void> {
     bestSlug = finalSlug;
 
     await query(
-      `INSERT INTO clusters (id, label, slug, centroid, conversation_count, severity)
-       VALUES ($1, $2, $3, $4::vector, 1, 'low')`,
-      [assignedClusterId, label, finalSlug, `[${embedding.join(',')}]`]
+      `INSERT INTO clusters (id, label, slug, centroid, conversation_count, severity, segment)
+       VALUES ($1, $2, $3, $4::vector, 1, 'low', $5)`,
+      [assignedClusterId, label, finalSlug, `[${embedding.join(',')}]`, event.segment]
     );
   }
 
@@ -212,7 +218,7 @@ export async function processEvent(event: SupportEvent): Promise<void> {
 
   // 6. Broadcast updated state to dashboard WebSocket clients
   const updatedCluster = await queryOne<Cluster>(
-    `SELECT id, label, slug, conversation_count, severity, created_at, updated_at
+    `SELECT id, label, slug, conversation_count, severity, created_at, updated_at, segment
      FROM clusters WHERE id = $1`,
     [assignedClusterId]
   );
