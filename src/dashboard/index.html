@@ -362,6 +362,7 @@ document.querySelectorAll('.tab').forEach(t => {
   });
 });
 
+fetch('/api/state').then(r => r.json()).then(s => { state = s; render(); }).catch(() => {});
 connect();
 </script>
 </body>
