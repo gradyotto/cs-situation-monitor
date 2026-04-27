@@ -166,29 +166,39 @@ async function buildDashboardState(): Promise<DashboardState> {
     inboxName: e.inbox_name ?? null,
   });
 
-  // Fetch events per cluster (last 10 each)
-  const clustersWithEvents = await Promise.all(
-    clusters.map(async (c) => {
-      const events = await query<EventRow>(
+  // Fetch events for all active clusters in a single query (avoids N concurrent connections)
+  const clusterIds = clusters.map((c) => c.id);
+  const allClusterEvents = clusterIds.length > 0
+    ? await query<EventRow>(
         `SELECT id, source, channel, external_id, contact_name, content, status,
                 cluster_id, severity, received_at, inbox_name
-         FROM support_events WHERE cluster_id = $1
-         ORDER BY received_at DESC LIMIT 10`,
-        [c.id]
-      );
-      return {
-        id: c.id,
-        label: c.label,
-        slug: c.slug,
-        centroid: null,
-        conversationCount: c.conversation_count,
-        severity: (c.severity as 'high' | 'medium' | 'low') ?? null,
-        createdAt: c.created_at,
-        updatedAt: c.updated_at,
-        events: events.map(mapEvent),
-      };
-    })
-  );
+         FROM (
+           SELECT *, ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY received_at DESC) AS rn
+           FROM support_events
+           WHERE cluster_id = ANY($1)
+         ) t WHERE rn <= 10`,
+        [clusterIds]
+      )
+    : [];
+
+  const eventsByCluster = new Map<string, EventRow[]>();
+  for (const e of allClusterEvents) {
+    const list = eventsByCluster.get(e.cluster_id) ?? [];
+    list.push(e);
+    eventsByCluster.set(e.cluster_id, list);
+  }
+
+  const clustersWithEvents = clusters.map((c) => ({
+    id: c.id,
+    label: c.label,
+    slug: c.slug,
+    centroid: null,
+    conversationCount: c.conversation_count,
+    severity: (c.severity as 'high' | 'medium' | 'low') ?? null,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+    events: (eventsByCluster.get(c.id) ?? []).map(mapEvent),
+  }));
 
   return {
     clusters: clustersWithEvents,

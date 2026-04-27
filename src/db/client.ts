@@ -8,9 +8,9 @@ export function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: config.database.url,
-      max: 20,
+      max: 8,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 5000,
     });
 
     pool.on('error', (err) => {
