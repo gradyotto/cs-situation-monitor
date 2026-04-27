@@ -175,7 +175,7 @@ async function buildDashboardState(): Promise<DashboardState> {
          FROM (
            SELECT *, ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY received_at DESC) AS rn
            FROM support_events
-           WHERE cluster_id = ANY($1)
+           WHERE cluster_id = ANY($1::uuid[])
          ) t WHERE rn <= 10`,
         [clusterIds]
       )
