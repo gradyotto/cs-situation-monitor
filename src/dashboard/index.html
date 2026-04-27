@@ -208,7 +208,6 @@ function renderMetrics() {
   const open = clusters.reduce((s,c)=>s+(c.events||[]).filter(e=>e.status==='open').length,0);
   document.getElementById('m-open').textContent = open || '0';
   document.getElementById('m-clusters').textContent = clusters.length;
-  document.getElementById('m-response').textContent = 'N/A';
   document.getElementById('m-critical').textContent = clusters.filter(c => c.severity === 'high').length;
 }
 
