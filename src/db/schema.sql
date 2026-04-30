@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS clusters (
   conversation_count INTEGER DEFAULT 0,
   severity TEXT CHECK (severity IN ('high', 'medium', 'low')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  archived_at TIMESTAMPTZ,
+  segment TEXT NOT NULL DEFAULT 'customer'
 );
 
 -- Support events table: normalized events from all channels
@@ -25,7 +27,10 @@ CREATE TABLE IF NOT EXISTS support_events (
   embedding vector(1536),
   cluster_id UUID REFERENCES clusters(id),
   severity TEXT CHECK (severity IN ('high', 'medium', 'low')),
-  received_at TIMESTAMPTZ DEFAULT NOW()
+  received_at TIMESTAMPTZ DEFAULT NOW(),
+  inbox_name TEXT,
+  labels TEXT[] DEFAULT '{}',
+  segment TEXT NOT NULL DEFAULT 'customer'
 );
 
 -- Vector similarity search index (requires training data; created after first inserts in prod)
