@@ -222,7 +222,7 @@ function statusBadge(s) {
 
 function channelBadge(ch, inboxName) {
   if (!ch) return '';
-  const label = inboxName || ch.toUpperCase();
+  const label = inboxName ? `${inboxName} · ${ch.toUpperCase()}` : ch.toUpperCase();
   return `<span class="badge ${ch}">${esc(label)}</span>`;
 }
 
