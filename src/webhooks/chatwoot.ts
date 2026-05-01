@@ -4,6 +4,7 @@ import { config } from '../config';
 import { SupportEvent } from '../types';
 import { processEvent } from '../clustering/engine';
 import { query, queryOne, setLastWebhookReceived } from '../db/client';
+import { invalidateStateCache } from '../server';
 
 const router = Router();
 
@@ -127,6 +128,7 @@ router.post('/', async (req: Request, res: Response) => {
           `UPDATE support_events SET labels = $1 WHERE external_id = $2 AND source = 'chatwoot'`,
           [labels, conversationId]
         );
+        invalidateStateCache();
       }
       setLastWebhookReceived(new Date());
       res.status(200).json({ ok: true });
@@ -141,6 +143,7 @@ router.post('/', async (req: Request, res: Response) => {
           `UPDATE support_events SET status = $1 WHERE external_id = $2 AND source = 'chatwoot'`,
           [newStatus, conversationId]
         );
+        invalidateStateCache();
       }
       setLastWebhookReceived(new Date());
       res.status(200).json({ ok: true });

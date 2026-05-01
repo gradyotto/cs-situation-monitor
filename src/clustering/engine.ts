@@ -24,6 +24,43 @@ export function getClusteringStats() {
   return { clusteredToday, labelsAppliedToday };
 }
 
+// In-memory centroid cache — avoids fetching large vector data from Supabase on every event
+interface CentroidEntry {
+  id: string;
+  label: string;
+  slug: string;
+  centroid: number[];
+  conversationCount: number;
+  segment: 'customer' | 'driver';
+}
+
+const centroidCache = new Map<string, CentroidEntry>();
+let cacheLoaded = false;
+
+async function ensureCacheLoaded(): Promise<void> {
+  if (cacheLoaded) return;
+  const rows = await query<{
+    id: string; label: string; slug: string;
+    centroid: string; conversation_count: number; segment: string;
+  }>(`SELECT id, label, slug, centroid::text, conversation_count, segment FROM clusters WHERE archived_at IS NULL`);
+  for (const row of rows) {
+    if (!row.centroid) continue;
+    centroidCache.set(row.id, {
+      id: row.id,
+      label: row.label,
+      slug: row.slug,
+      centroid: parseCentroid(row.centroid),
+      conversationCount: row.conversation_count,
+      segment: row.segment as 'customer' | 'driver',
+    });
+  }
+  cacheLoaded = true;
+}
+
+function parseCentroid(raw: string): number[] {
+  return raw.replace(/^\[/, '').replace(/\]$/, '').split(',').map(Number);
+}
+
 /** Cosine similarity between two equal-length vectors */
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0, normA = 0, normB = 0;
@@ -112,70 +149,57 @@ async function persistEvent(event: SupportEvent): Promise<void> {
 export async function processEvent(event: SupportEvent): Promise<void> {
   checkDailyReset();
 
-  // 1. Embed — include agent labels in text so they influence cluster similarity
+  // 1. Load centroid cache on first call (avoids repeated large vector fetches from Supabase)
+  await ensureCacheLoaded();
+
+  // 2. Embed — include agent labels in text so they influence cluster similarity
   const textToEmbed = event.labels.length > 0
     ? `${event.content}\nAgent labels: ${event.labels.join(', ')}`
     : event.content;
   const embedding = await embedContent(textToEmbed);
 
-  // 2. Find best matching cluster (same segment only)
-  interface ClusterRow {
-    id: string;
-    label: string;
-    slug: string;
-    centroid: string;
-    conversation_count: number;
-  }
-
-  const clusters = await query<ClusterRow>(
-    `SELECT id, label, slug, centroid::text, conversation_count FROM clusters WHERE segment = $1`,
-    [event.segment]
-  );
-
+  // 3. Find best matching cluster from cache (same segment only)
   let bestClusterId: string | null = null;
   let bestClusterLabel: string | null = null;
   let bestSlug: string | null = null;
   let bestSimilarity = -1;
+  let bestEntry: CentroidEntry | null = null;
 
-  for (const cluster of clusters) {
-    if (!cluster.centroid) continue;
-    // Parse pgvector string format: [f1,f2,...]
-    const centroidStr = cluster.centroid.replace(/^\[/, '').replace(/\]$/, '');
-    const centroid = centroidStr.split(',').map(Number);
-    const sim = cosineSimilarity(embedding, centroid);
+  for (const entry of centroidCache.values()) {
+    if (entry.segment !== event.segment) continue;
+    const sim = cosineSimilarity(embedding, entry.centroid);
     if (sim > bestSimilarity) {
       bestSimilarity = sim;
-      bestClusterId = cluster.id;
-      bestClusterLabel = cluster.label;
-      bestSlug = cluster.slug;
+      bestClusterId = entry.id;
+      bestClusterLabel = entry.label;
+      bestSlug = entry.slug;
+      bestEntry = entry;
     }
   }
 
   let assignedClusterId: string;
   let assignedClusterLabel: string;
 
-  if (bestSimilarity >= config.clustering.threshold && bestClusterId) {
+  if (bestSimilarity >= config.clustering.threshold && bestClusterId && bestEntry) {
     // 3a. Assign to existing cluster
     assignedClusterId = bestClusterId;
     assignedClusterLabel = bestClusterLabel!;
 
-    // Update centroid (rolling average) and increment count
-    const clusterRow = clusters.find((c) => c.id === bestClusterId)!;
-    const oldCentroid = clusterRow.centroid
-      .replace(/^\[/, '')
-      .replace(/\]$/, '')
-      .split(',')
-      .map(Number);
-    const newCount = clusterRow.conversation_count + 1;
-    const newCentroid = updateCentroid(oldCentroid, embedding, newCount);
+    const newCount = bestEntry.conversationCount + 1;
+    const newCentroid = updateCentroid(bestEntry.centroid, embedding, newCount);
     const severity = await computeSeverity(assignedClusterId);
 
     await query(
-      `UPDATE clusters
-       SET centroid = $1::vector, conversation_count = $2, severity = $3
-       WHERE id = $4`,
+      `UPDATE clusters SET centroid = $1::vector, conversation_count = $2, severity = $3 WHERE id = $4`,
       [`[${newCentroid.join(',')}]`, newCount, severity, assignedClusterId]
     );
+
+    // Update cache in place
+    centroidCache.set(assignedClusterId, {
+      ...bestEntry,
+      centroid: newCentroid,
+      conversationCount: newCount,
+    });
   } else {
     // 3b. Create new cluster
     const label = await generateClusterLabel(event.content, event.labels);
@@ -183,13 +207,10 @@ export async function processEvent(event: SupportEvent): Promise<void> {
     assignedClusterId = uuidv4();
     assignedClusterLabel = label;
 
-    // Handle slug collision by appending a short suffix
+    // Slug collision check against cache (no DB round trip needed)
     let finalSlug = slug;
-    const existing = await queryOne<{ id: string }>(
-      `SELECT id FROM clusters WHERE slug = $1`,
-      [slug]
-    );
-    if (existing) {
+    const slugExists = [...centroidCache.values()].some((e) => e.slug === slug);
+    if (slugExists) {
       finalSlug = `${slug.slice(0, 28)}-${assignedClusterId.slice(0, 4)}`;
     }
     bestSlug = finalSlug;
@@ -199,6 +220,16 @@ export async function processEvent(event: SupportEvent): Promise<void> {
        VALUES ($1, $2, $3, $4::vector, 1, 'low', $5)`,
       [assignedClusterId, label, finalSlug, `[${embedding.join(',')}]`, event.segment]
     );
+
+    // Add to cache
+    centroidCache.set(assignedClusterId, {
+      id: assignedClusterId,
+      label,
+      slug: finalSlug,
+      centroid: embedding,
+      conversationCount: 1,
+      segment: event.segment,
+    });
   }
 
   // Update event with cluster assignment
@@ -216,7 +247,7 @@ export async function processEvent(event: SupportEvent): Promise<void> {
     await applyLabelToChatwoot(event, bestSlug);
   }
 
-  // 6. Broadcast updated state to dashboard WebSocket clients
+  // 6. Broadcast updated cluster to dashboard
   const updatedCluster = await queryOne<Cluster>(
     `SELECT id, label, slug, conversation_count, severity, created_at, updated_at, segment
      FROM clusters WHERE id = $1`,

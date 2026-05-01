@@ -85,7 +85,7 @@ app.post('/api/clusters/:id/archive', async (req: Request, res: Response) => {
       `UPDATE clusters SET archived_at = NOW() WHERE id = $1`,
       [req.params.id]
     );
-    await broadcastState();
+    await broadcastFreshState();
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -98,7 +98,7 @@ app.post('/api/clusters/:id/restore', async (req: Request, res: Response) => {
       `UPDATE clusters SET archived_at = NULL WHERE id = $1`,
       [req.params.id]
     );
-    await broadcastState();
+    await broadcastFreshState();
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -221,11 +221,28 @@ async function buildDashboardState(): Promise<DashboardState> {
   };
 }
 
-// --- Periodic state broadcast to WS clients ---
+// --- State cache: rebuilt by processEvent, reused by periodic broadcast ---
+let cachedState: DashboardState | null = null;
+
+export function invalidateStateCache(): void {
+  cachedState = null;
+}
+
 async function broadcastState(): Promise<void> {
   try {
-    const state = await buildDashboardState();
-    broadcast({ type: 'state', payload: state });
+    if (!cachedState) {
+      cachedState = await buildDashboardState();
+    }
+    broadcast({ type: 'state', payload: cachedState });
+  } catch (err) {
+    console.error('Failed to broadcast state:', err);
+  }
+}
+
+async function broadcastFreshState(): Promise<void> {
+  try {
+    cachedState = await buildDashboardState();
+    broadcast({ type: 'state', payload: cachedState });
   } catch (err) {
     console.error('Failed to broadcast state:', err);
   }
@@ -251,8 +268,8 @@ async function start(): Promise<void> {
     console.log(`WebSocket endpoint: ws://localhost:${config.port}/ws`);
   });
 
-  // Send full state to clients every 30 seconds
-  setInterval(broadcastState, 30_000);
+  // Send full state to clients every 60 seconds (cache is reused if no events arrived)
+  setInterval(broadcastState, 60_000);
 
   // Start cron email jobs
   startEmailScheduler();
