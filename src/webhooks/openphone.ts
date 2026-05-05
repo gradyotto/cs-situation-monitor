@@ -27,6 +27,7 @@ function verifySignature(req: Request): boolean {
 
 router.post('/', async (req: Request, res: Response) => {
   if (!verifySignature(req)) {
+    console.error('[openphone] signature verification failed');
     res.status(401).json({ error: 'Invalid signature' });
     return;
   }
@@ -34,12 +35,16 @@ router.post('/', async (req: Request, res: Response) => {
   const body = req.body;
   const eventType: string = body.type ?? body.event ?? '';
 
+  console.log(`[openphone] received event type: ${JSON.stringify(eventType)}`);
+
   try {
     let event: SupportEvent | null = null;
 
     if (eventType === 'call.completed' || eventType === 'call.summary.completed') {
       const data = body.data ?? body;
       const summary: string = data.summary ?? data.object?.summary ?? '';
+
+      console.log(`[openphone] ${eventType} — summary length: ${summary.length}, externalId: ${data.id ?? data.object?.id}`);
 
       if (!summary.trim()) {
         setLastWebhookReceived(new Date());
